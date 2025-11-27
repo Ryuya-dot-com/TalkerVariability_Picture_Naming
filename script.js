@@ -20,6 +20,8 @@
   const messageEl = document.getElementById('message');
   const imgEl = document.getElementById('stimulus-img');
   const participantInput = document.getElementById('participant-id');
+  const downloadBtn = document.getElementById('download-btn');
+  const configEl = document.getElementById('config');
 
   // Helpers
   const setStatus = (txt) => statusEl.textContent = txt;
@@ -76,7 +78,7 @@
     const total = order.length;
     for (const item of order) {
       const url = `${IMAGE_PATH}/${item.image_file}`;
-      setStatus(`画像プリロード中 ${loaded}/${total}: ${item.word}`);
+      setStatus(`画像プリロード中 (${loaded + 1}/${total})`);
       await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => { images.set(item.word, img); loaded += 1; resolve(); };
@@ -114,6 +116,11 @@
     const img = images.get(word);
     imgEl.src = img.src;
     imgEl.style.display = 'block';
+  }
+  function enterExperimentScreen() {
+    configEl.classList.add('hidden');
+    startBtn.classList.add('hidden');
+    downloadBtn.classList.add('hidden');
   }
 
   // PCM収集→WAVエンコード
@@ -316,7 +323,7 @@
       showMessage('スペースキーで開始');
 
       startBtn.onclick = async () => {
-        startBtn.classList.add('hidden');
+        enterExperimentScreen();
         try {
           const { results, recordings } = await runTask(participantId, order, images, micStream);
           const zipBlob = await createZip(participantId, results, recordings);
@@ -332,6 +339,9 @@
         } catch (err) {
           console.error(err);
           setStatus(`エラー: ${err.message}`);
+          configEl.classList.remove('hidden');
+          startBtn.classList.remove('hidden');
+          document.body.classList.remove('running');
           preloadBtn.disabled = false;
         }
       };
