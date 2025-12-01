@@ -1,15 +1,39 @@
 (() => {
   // Constants
-  const WORDS = [
-    'ardilla','basurero','caballo','cebolla','cinta','conejo',
-    'cuaderno','elote','fresas','gato','grapadora','hongos',
-    'lapiz','lechuga','loro','manzana','naranja','oso',
-    'pato','pez','reloj','sandia','tijeras','tiza',
-  ];
-  const IMAGE_PATH = 'images';
+  const IMAGE_BASE_URL = 'https://ryuya-dot-com.github.io/TalkerVariability_Picture_Naming/images';
+  const IMAGE_EXT = '.jpg';
   const RECORD_DURATION_MS = 6000; // 6 seconds
   const ITI_MS = 1500; // 1.5 seconds
   const REST_MS = 5000; // 5 seconds start/end
+
+  const LIST1_TARGETS = [
+    { id: 1, list: 1, word: 'manzana' },
+    { id: 2, list: 1, word: 'oso' },
+    { id: 3, list: 1, word: 'reloj' },
+    { id: 4, list: 1, word: 'tijeras' },
+    { id: 5, list: 1, word: 'sandía' },
+    { id: 6, list: 1, word: 'pato' },
+    { id: 7, list: 1, word: 'grapadora' },
+    { id: 8, list: 1, word: 'cinta' },
+    { id: 9, list: 1, word: 'fresas' },
+    { id: 10, list: 1, word: 'tiza' },
+    { id: 11, list: 1, word: 'caballo' },
+    { id: 12, list: 1, word: 'elote' },
+  ];
+  const LIST2_TARGETS = [
+    { id: 13, list: 2, word: 'hongos' },
+    { id: 14, list: 2, word: 'cebolla' },
+    { id: 15, list: 2, word: 'cuaderno' },
+    { id: 16, list: 2, word: 'ardilla' },
+    { id: 17, list: 2, word: 'loro' },
+    { id: 18, list: 2, word: 'lechuga' },
+    { id: 19, list: 2, word: 'lápiz' },
+    { id: 20, list: 2, word: 'conejo' },
+    { id: 21, list: 2, word: 'gato' },
+    { id: 22, list: 2, word: 'naranja' },
+    { id: 23, list: 2, word: 'basurero' },
+    { id: 24, list: 2, word: 'pez' },
+  ];
 
   // DOM
   const preloadBtn = document.getElementById('preload-btn');
@@ -27,6 +51,7 @@
   const setStatus = (txt) => statusEl.textContent = txt;
   const setLog = (txt) => logEl.textContent = txt;
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
+  const stripAccents = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   function mulberry32(seed) {
     return function() {
@@ -48,28 +73,35 @@
     const digits = pid.match(/\d+/g);
     return digits ? parseInt(digits.join(''), 10) : 0;
   };
+  const makeImageFileName = (word) => `${stripAccents(word)}${IMAGE_EXT}`;
 
   function buildOrder(participantId) {
     const n = parseNumericId(participantId);
     const rng = mulberry32(n * 1000 + 7);
-    const firstHalf = seededShuffle(WORDS.slice(0, 12), rng);
-    const secondHalf = seededShuffle(WORDS.slice(12), rng);
-    let takeFirst = rng() < 0.5;
+    const list1 = seededShuffle(LIST1_TARGETS, rng);
+    const list2 = seededShuffle(LIST2_TARGETS, rng);
+    let takeFirst = n % 2 === 1; // odd -> List 1 first, even -> List 2 first
     const ordered = [];
-    let i = 0, j = 0;
-    while (i < firstHalf.length || j < secondHalf.length) {
-      if (takeFirst && i < firstHalf.length) {
-        ordered.push(firstHalf[i++]);
-      } else if (!takeFirst && j < secondHalf.length) {
-        ordered.push(secondHalf[j++]);
-      } else if (i < firstHalf.length) {
-        ordered.push(firstHalf[i++]);
-      } else if (j < secondHalf.length) {
-        ordered.push(secondHalf[j++]);
+    let i = 0;
+    let j = 0;
+    while (i < list1.length || j < list2.length) {
+      if (takeFirst && i < list1.length) {
+        ordered.push(list1[i++]);
+      } else if (!takeFirst && j < list2.length) {
+        ordered.push(list2[j++]);
+      } else if (i < list1.length) {
+        ordered.push(list1[i++]);
+      } else if (j < list2.length) {
+        ordered.push(list2[j++]);
       }
       takeFirst = !takeFirst;
     }
-    return ordered.map((w) => ({ word: w, word_id: WORDS.indexOf(w) + 1, image_file: `${w}.jpg` }));
+    return ordered.map((item) => ({
+      word: item.word,
+      word_id: item.id,
+      list: item.list,
+      image_file: makeImageFileName(item.word),
+    }));
   }
 
   async function preloadImages(order) {
@@ -77,7 +109,7 @@
     let loaded = 0;
     const total = order.length;
     for (const item of order) {
-      const url = `${IMAGE_PATH}/${item.image_file}`;
+      const url = `${IMAGE_BASE_URL}/${item.image_file}`;
       setStatus(`画像プリロード中 (${loaded + 1}/${total})`);
       await new Promise((resolve, reject) => {
         const img = new Image();
@@ -196,13 +228,14 @@
   }
 
   function buildCsv(rows) {
-    const header = ['trial','word','word_id','image_file','image_onset_ms','recording_start_ms','recording_end_ms','iti_ms','participant_id','recording_file'];
+    const header = ['trial','word','word_id','list','image_file','image_onset_ms','recording_start_ms','recording_end_ms','iti_ms','participant_id','recording_file'];
     const lines = [header.join(',')];
     rows.forEach((r) => {
       lines.push([
         r.trial,
         r.word,
         r.word_id,
+        r.list,
         r.image_file,
         r.image_onset_ms.toFixed(3),
         r.recording_start_ms.toFixed(3),
@@ -266,6 +299,7 @@
         trial: idx + 1,
         word: trial.word,
         word_id: trial.word_id,
+        list: trial.list,
         image_file: trial.image_file,
         image_onset_ms: imageOnsetMs,
         recording_start_ms: recStartMs,
