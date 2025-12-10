@@ -1,6 +1,6 @@
 (() => {
   // Constants
-  const IMAGE_BASE_URL = 'https://ryuya-dot-com.github.io/TalkerVariability_Picture_Naming/images';
+  const IMAGE_BASE_URL = 'https://ryuya-dot-com.github.io/TalkerVariability_Encoding/images';
   const IMAGE_EXT = '.jpg';
   const RECORD_DURATION_MS = 6000; // 6 seconds
   const ITI_MS = 1500; // 1.5 seconds
@@ -46,6 +46,19 @@
   const participantInput = document.getElementById('participant-id');
   const downloadBtn = document.getElementById('download-btn');
   const configEl = document.getElementById('config');
+
+  // Warn on reload/back
+  window.addEventListener('beforeunload', (e) => {
+    e.preventDefault();
+    e.returnValue = 'Leaving this page will interrupt the task. Are you sure?';
+  });
+  if (history && history.pushState) {
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', () => {
+      alert('Going back will interrupt the task. Please avoid navigating away.');
+      history.pushState(null, '', location.href);
+    });
+  }
 
   // Helpers
   const setStatus = (txt) => statusEl.textContent = txt;
@@ -228,7 +241,15 @@
   }
 
   function buildCsv(rows) {
-    const header = ['trial','word','word_id','list','image_file','image_onset_ms','recording_start_ms','recording_end_ms','iti_ms','participant_id','recording_file'];
+    const header = [
+      'trial','word','word_id','list','image_file',
+      'trial_start_epoch_ms',
+      'image_onset_ms',
+      'image_onset_epoch_ms',
+      'recording_start_ms','recording_end_ms',
+      'recording_start_epoch_ms','recording_end_epoch_ms',
+      'iti_ms','participant_id','recording_file'
+    ];
     const lines = [header.join(',')];
     rows.forEach((r) => {
       lines.push([
@@ -237,9 +258,13 @@
         r.word_id,
         r.list,
         r.image_file,
+        r.trial_start_epoch_ms,
         r.image_onset_ms.toFixed(3),
+        r.image_onset_epoch_ms,
         r.recording_start_ms.toFixed(3),
         r.recording_end_ms.toFixed(3),
+        r.recording_start_epoch_ms,
+        r.recording_end_epoch_ms,
         r.iti_ms,
         r.participant_id,
         r.recording_file,
@@ -269,7 +294,6 @@
 
     const results = [];
     const recordings = [];
-    const expStart = performance.now();
 
     const recorderFactory = () => makePcmRecorder(micStream);
 
@@ -282,15 +306,21 @@
       const trial = order[idx];
       const { start, stopAfter } = recorderFactory();
 
+      const trialStart = performance.now();
+      const trialStartEpochMs = Date.now();
+
       showImage(trial.word, images);
-      const imageOnsetMs = performance.now() - expStart;
+      const imageOnsetMs = performance.now() - trialStart;
+      const imageOnsetEpochMs = trialStartEpochMs + imageOnsetMs;
 
       await start();
-      const recStartMs = performance.now() - expStart;
+      const recStartMs = performance.now() - trialStart;
+      const recStartEpochMs = trialStartEpochMs + recStartMs;
       const blobPromise = stopAfter(RECORD_DURATION_MS);
 
       const recBlob = await blobPromise;
-      const recEndMs = performance.now() - expStart;
+      const recEndMs = performance.now() - trialStart;
+      const recEndEpochMs = trialStartEpochMs + recEndMs;
 
       const filename = `${participantId}_${trial.word}.wav`;
       recordings.push({ filename, blob: recBlob });
@@ -301,9 +331,13 @@
         word_id: trial.word_id,
         list: trial.list,
         image_file: trial.image_file,
+        trial_start_epoch_ms: trialStartEpochMs,
         image_onset_ms: imageOnsetMs,
+        image_onset_epoch_ms: imageOnsetEpochMs,
         recording_start_ms: recStartMs,
         recording_end_ms: recEndMs,
+        recording_start_epoch_ms: recStartEpochMs,
+        recording_end_epoch_ms: recEndEpochMs,
         iti_ms: ITI_MS,
         participant_id: participantId,
         recording_file: filename,
