@@ -375,6 +375,7 @@
     // Hide instructions once started
     messageEl.style.display = 'none';
     statusEl.textContent = '';
+    setLog('');
 
     const totalTrials = order.length;
     let completedTrials = 0;
@@ -385,7 +386,6 @@
 
     // Initial rest
     showFixation({ completed: completedTrials, total: totalTrials });
-    setStatus(`開始前の休憩 ${restMs / 1000}秒`);
     await delay(restMs);
 
     for (let idx = 0; idx < order.length; idx++) {
@@ -438,13 +438,11 @@
 
       completedTrials = idx + 1;
       showFixation({ completed: completedTrials, total: totalTrials });
-      setStatus(`試行 ${idx + 1}/${order.length} 完了。ITI ${itiMs / 1000}秒`);
       await delay(itiMs);
     }
 
     // Final rest
     showFixation({ completed: totalTrials, total: totalTrials });
-    setStatus(`終了前の休憩 ${restMs / 1000}秒`);
     await delay(restMs);
 
     showMessage('終了しました。お疲れさまでした。');
