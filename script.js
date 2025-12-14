@@ -81,8 +81,6 @@
   const participantInput = document.getElementById('participant-id');
   const downloadBtn = document.getElementById('download-btn');
   const configEl = document.getElementById('config');
-  const sessionRadios = document.querySelectorAll('input[name="session-type"]');
-  const sessionNoteEl = document.getElementById('session-note');
   const progressContainer = document.getElementById('progress-container');
   const progressBar = document.getElementById('progress-bar');
 
@@ -104,20 +102,6 @@
   const setLog = (txt) => logEl.textContent = txt;
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
   const stripAccents = (str) => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const getSessionKey = () => {
-    const checked = document.querySelector('input[name="session-type"]:checked');
-    return checked ? checked.value : DEFAULT_SESSION_KEY;
-  };
-  const getSessionConfig = () => SESSION_CONFIGS[getSessionKey()] || SESSION_CONFIGS[DEFAULT_SESSION_KEY];
-  const updateSessionNote = () => {
-    if (!sessionNoteEl) return;
-    const conf = getSessionConfig();
-    sessionNoteEl.textContent = conf.note;
-  };
-  if (sessionRadios && sessionRadios.length) {
-    sessionRadios.forEach((r) => r.addEventListener('change', updateSessionNote));
-    updateSessionNote();
-  }
   const hideProgress = () => {
     if (progressContainer) progressContainer.style.display = 'none';
   };
@@ -376,6 +360,8 @@
     messageEl.style.display = 'none';
     statusEl.textContent = '';
     setLog('');
+    hideProgress();
+    setLog('');
 
     const totalTrials = order.length;
     let completedTrials = 0;
@@ -446,6 +432,7 @@
     await delay(restMs);
 
     showMessage('終了しました。お疲れさまでした。');
+    document.body.classList.remove('running');
     setStatus('結果を準備しています...');
     return { results, recordings };
   }
@@ -469,7 +456,6 @@
       setStatus('参加者IDを入力してください。');
       return;
     }
-    const sessionConfig = getSessionConfig();
 
     preloadBtn.disabled = true;
     startBtn.classList.add('hidden');
@@ -477,38 +463,41 @@
     setLog('');
 
     try {
-      const order = sessionConfig.buildOrder(participantId);
-      const images = await preloadImages(order, sessionConfig.imageBaseUrl);
-      let micStream = null;
-      if (sessionConfig.recordingEnabled) {
-        setStatus('マイク許可を確認しています...');
-        micStream = await getMicStream();
-      }
-      setStatus(`${sessionConfig.label}のプリロード完了。スペースキーで開始できます。`);
-      setLog(`モード: ${sessionConfig.label} | 試行数: ${order.length} | 録音 ${sessionConfig.recordingEnabled ? 'あり' : 'なし'} / ITI ${sessionConfig.itiMs / 1000}秒 / 休憩 ${sessionConfig.restMs / 1000}秒`);
+      const practiceOrder = buildPracticeOrder(participantId);
+      const productionOrder = buildProductionOrder(participantId);
+      const practiceImages = await preloadImages(practiceOrder, SESSION_CONFIGS.practice.imageBaseUrl);
+      const productionImages = await preloadImages(productionOrder, SESSION_CONFIGS.production.imageBaseUrl);
+
+      setStatus('プリロード完了。スペースキーで練習を開始できます。');
       startBtn.classList.remove('hidden');
-      showMessage('スペースキーで開始');
+      showMessage('スペースキーで練習開始');
+      setLog('');
 
       startBtn.onclick = async () => {
         enterExperimentScreen();
+        startBtn.classList.add('hidden');
         try {
-          const { results, recordings } = await runTask(participantId, order, images, micStream, sessionConfig);
-          if (sessionConfig.recordingEnabled) {
-            const zipBlob = await createZip(sessionConfig, participantId, results, recordings);
-            const url = URL.createObjectURL(zipBlob);
-            // 自動ダウンロード
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = sessionConfig.zipFileName(participantId);
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setStatus(`${sessionConfig.label} の結果をダウンロードしました。`);
-          } else {
-            setStatus('練習を完了しました。録音はありません。');
-            showMessage('練習終了');
-            document.body.classList.remove('running');
-          }
+          // 練習（録音なし）
+          await runTask(participantId, practiceOrder, practiceImages, null, SESSION_CONFIGS.practice);
+          setStatus('練習を完了しました。本番のためマイク許可を確認します...');
+          showMessage('練習終了');
+
+          // マイク許可
+          let micStream = null;
+          micStream = await getMicStream();
+
+          // 本番
+          const { results, recordings } = await runTask(participantId, productionOrder, productionImages, micStream, SESSION_CONFIGS.production);
+          const zipBlob = await createZip(SESSION_CONFIGS.production, participantId, results, recordings);
+          const url = URL.createObjectURL(zipBlob);
+          // 自動ダウンロード
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = SESSION_CONFIGS.production.zipFileName(participantId);
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setStatus('本番の結果をダウンロードしました。');
         } catch (err) {
           console.error(err);
           setStatus(`エラー: ${err.message}`);
