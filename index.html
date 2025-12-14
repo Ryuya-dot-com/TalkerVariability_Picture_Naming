@@ -16,6 +16,8 @@
     #stimulus-area { position:relative; width:100%; height:60vh; border:1px solid #333; border-radius:8px; background:#000; display:flex; align-items:center; justify-content:center; overflow:hidden; }
     #stimulus-img { max-width:90%; max-height:90%; display:none; }
     #fixation, #message { position:absolute; font-size:48px; font-weight:600; display:none; }
+    #progress-container { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); width:70%; height:10px; background:#111; border:1px solid #333; border-radius:999px; overflow:hidden; display:none; }
+    #progress-bar { height:100%; width:0%; background:#2f80ed; transition:width 0.3s ease; }
     #log { margin-top:12px; font-size:14px; color:#aaa; min-height:20px; }
     #download-btn { margin-top:16px; background:#27ae60; }
     .hidden { display:none !important; }
@@ -28,15 +30,25 @@
       <label>参加者ID (例: 001)
         <input id="participant-id" type="text" placeholder="001" />
       </label>
-      <div style="color:#ccc; font-size:14px; line-height:1.6; text-align:left;">
-        <strong>実施前に確認してください：</strong>
-        <ul style="margin:8px 0 0 18px; padding:0;">
-          <li>所要時間: 約4分（24試行・録音6秒/ITI1.5秒）</li>
-          <li>提示語数: 24語（各1回）</li>
-          <li>ランダム順: 前半12語と後半12語をIDシードでシャッフルし交互提示</li>
-          <li>マイク録音を行います。開始前に許可ダイアログへの対応をお願いします</li>
-          <li>全画像プリロード完了後、スペースキーで開始します</li>
-        </ul>
+      <div id="session-picker" style="margin:10px 0; text-align:left;">
+        <div style="font-weight:600; margin-bottom:6px;">セッション</div>
+        <label style="display:flex; align-items:center; gap:8px; margin:4px 0;">
+          <input type="radio" name="session-type" value="production" checked />
+          <span>本番（24試行）</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; margin:4px 0;">
+          <input type="radio" name="session-type" value="practice" />
+          <span>練習（動物5試行）</span>
+        </label>
+        <div id="session-note" style="color:#aaa; font-size:13px; line-height:1.5; margin-top:4px;"></div>
+      </div>
+      <div style="color:#ccc; font-size:14px; line-height:1.7; text-align:left; padding:10px; border:1px solid #222; border-radius:8px; background:#0b0b0b;">
+        <div style="font-weight:700; margin-bottom:6px;">参加者への指示</div>
+        <div>- これから24枚の写真が提示されます（練習は動物5枚）。</div>
+        <div>- 写真が出たら、できるだけ早くスペイン語の単語を声に出してください。</div>
+        <div>- 練習では英語で答えてかまいません（録音もしません）。</div>
+        <div>- 本番では録音します。マイク許可ダイアログが出たら許可してください。</div>
+        <div style="margin-top:6px; color:#8dc1ff;">※ 画像プリロード後、スペースキーで開始します。試行は自動で進みます。</div>
       </div>
       <button id="preload-btn">プリロード開始</button>
     </div>
@@ -45,6 +57,9 @@
       <img id="stimulus-img" alt="stimulus" />
       <div id="fixation">+</div>
       <div id="message"></div>
+      <div id="progress-container">
+        <div id="progress-bar"></div>
+      </div>
     </div>
     <div id="log"></div>
     <button id="start-btn" class="hidden">スペースキーで開始</button>
