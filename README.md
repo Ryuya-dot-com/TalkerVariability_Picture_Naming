@@ -19,10 +19,13 @@ Offline-capable picture naming task. Open `index.html` in a modern browser. Imag
   - `recording_start_ms, recording_end_ms` (ms from trial start)  
   - `recording_start_epoch_ms, recording_end_epoch_ms`  
   - `iti_ms, participant_id, recording_file`
+  - `image_onset_ms_rel, onset_ms_from_recording_start, latency_ms_from_image_onset`
+  - `latency_status, latency_dynamic_threshold_db, latency_fallback_used, latency_note`
 - WAV per trial: `{participantId}_{word}.wav` (accent-stripped). Each recording is mic-only (no playback mixed).
 
 ## Latency analysis
-- Use `analyze_latency.py` in this folder:  
+- Latency columns are computed in-browser after the task ends (image onset is time 0; threshold -40 dB, guard 0 ms, frame 10 ms, min 4 frames) and included in `results_*.csv`.
+- For offline QC, use `analyze_latency.py` in this folder:  
   ```bash
   /usr/bin/python3 Experiment/production_task/analyze_latency.py \
     --root ./Experiment/production_task/output_dir

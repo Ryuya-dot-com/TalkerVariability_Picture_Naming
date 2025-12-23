@@ -39,7 +39,7 @@
   const SESSION_CONFIGS = {
     production: {
       key: 'production',
-      label: '本番（24試行）',
+      label: 'ステップ4/4: 本番（24試行）',
       note: 'これから24枚の写真が提示されます。写真が提示されたらできるだけ早くスペイン語の単語を声に出してください。',
       imageBaseUrl: 'https://ryuya-dot-com.github.io/TalkerVariability_Encoding/images',
       imageExt: '.jpg',
@@ -48,13 +48,14 @@
       restMs: 5000,
       buildOrder: buildProductionOrder,
       recordingEnabled: true,
+      startMessage: '本番開始（スペースキー）',
       csvFileName: (pid) => `results_${pid}.csv`,
       zipFileName: (pid) => `production_${pid}.zip`,
       recordingFileName: (pid, word) => `${pid}_${word}.wav`,
     },
     practice: {
       key: 'practice',
-      label: '練習',
+      label: 'ステップ2/4: 練習',
       note: '英語で練習してみましょう。写真が出たら即座に動物の名前を英語で言ってみましょう。',
       imageBaseUrl: 'practice',
       imageExt: '.png',
@@ -63,12 +64,19 @@
       restMs: 5000,
       buildOrder: buildPracticeOrder,
       recordingEnabled: false,
+      startMessage: '練習開始（スペースキー）',
       csvFileName: (pid) => `results_practice_${pid}.csv`,
       zipFileName: (pid) => `practice_${pid}.zip`,
       recordingFileName: (pid, word) => `${pid}_practice_${word}.wav`,
     },
   };
   const DEFAULT_SESSION_KEY = 'production';
+  const LATENCY_CONFIG = {
+    thresholdDb: -40,
+    frameMs: 10,
+    minFrames: 4,
+    guardMs: 0,
+  };
 
   // DOM
   const preloadBtn = document.getElementById('preload-btn');
@@ -134,6 +142,161 @@
     return digits ? parseInt(digits.join(''), 10) : 0;
   };
   const makeImageFileName = (word, ext) => `${stripAccents(word)}${ext}`;
+  const fmtOptionalNumber = (val) => {
+    if (val === null || val === undefined || Number.isNaN(val)) return '';
+    return Number(val).toFixed(3);
+  };
+  const percentile = (arr, p) => {
+    if (!arr || arr.length === 0) return NaN;
+    const sorted = Array.from(arr).sort((a, b) => a - b);
+    const idx = Math.floor((p / 100) * (sorted.length - 1));
+    return sorted[idx];
+  };
+
+  function rollingEnergyDb(signal, sampleRate, frameMs) {
+    const frameLength = Math.max(1, Math.round(sampleRate * frameMs / 1000));
+    const n = signal.length;
+    const energyLen = Math.max(0, n - frameLength + 1);
+    const energyDb = new Float32Array(energyLen);
+    if (energyLen === 0) return { energyDb, frameLength };
+    const cumsum = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) {
+      const s = signal[i];
+      cumsum[i + 1] = cumsum[i] + s * s;
+    }
+    const inv = 1 / frameLength;
+    for (let i = 0; i < energyLen; i++) {
+      const sum = cumsum[i + frameLength] - cumsum[i];
+      const energy = sum * inv;
+      energyDb[i] = 10 * Math.log10(Math.max(energy, 1e-12));
+    }
+    return { energyDb, frameLength };
+  }
+
+  function detectOnsetAfter(energyDb, sampleRate, frameLength, startMs, thresholdDb, minFrames) {
+    if (!energyDb.length) return null;
+    const startSample = Math.round(startMs / 1000 * sampleRate);
+    const startIdx = Math.min(energyDb.length, Math.max(0, startSample));
+    const lastStart = energyDb.length - minFrames;
+    for (let i = startIdx; i <= lastStart; i++) {
+      let ok = true;
+      for (let k = 0; k < minFrames; k++) {
+        if (energyDb[i + k] <= thresholdDb) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        const latencySamples = i + frameLength / 2;
+        return latencySamples / sampleRate * 1000;
+      }
+    }
+    return null;
+  }
+
+  function decodeToMono(audioBuffer) {
+    const channels = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length;
+    if (channels === 1) return audioBuffer.getChannelData(0);
+    const mono = new Float32Array(length);
+    for (let ch = 0; ch < channels; ch++) {
+      const data = audioBuffer.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        mono[i] += data[i];
+      }
+    }
+    const inv = 1 / channels;
+    for (let i = 0; i < length; i++) {
+      mono[i] *= inv;
+    }
+    return mono;
+  }
+
+  function computeLatencyMetrics(audioBuffer, row) {
+    const sampleRate = audioBuffer.sampleRate;
+    const signal = decodeToMono(audioBuffer);
+    const { energyDb, frameLength } = rollingEnergyDb(signal, sampleRate, LATENCY_CONFIG.frameMs);
+
+    const imageOnsetAbs = Number(row.image_onset_ms) || 0;
+    const recStartAbs = Number(row.recording_start_ms) || 0;
+    const imageOnsetRel = Math.max(0, imageOnsetAbs - recStartAbs);
+    const startMs = imageOnsetRel + LATENCY_CONFIG.guardMs;
+
+    let onsetMs = detectOnsetAfter(
+      energyDb,
+      sampleRate,
+      frameLength,
+      startMs,
+      LATENCY_CONFIG.thresholdDb,
+      LATENCY_CONFIG.minFrames
+    );
+
+    let fallbackUsed = false;
+    let dynamicThreshold = LATENCY_CONFIG.thresholdDb;
+    if (onsetMs === null && energyDb.length) {
+      const preLen = Math.min(
+        energyDb.length,
+        Math.max(1, Math.floor(imageOnsetRel / 1000 * sampleRate))
+      );
+      if (preLen > 0) {
+        const noiseDb = percentile(energyDb.subarray(0, preLen), 75);
+        dynamicThreshold = Math.max(LATENCY_CONFIG.thresholdDb - 5, noiseDb + 6);
+        fallbackUsed = true;
+        onsetMs = detectOnsetAfter(
+          energyDb,
+          sampleRate,
+          frameLength,
+          startMs,
+          dynamicThreshold,
+          LATENCY_CONFIG.minFrames
+        );
+      }
+    }
+
+    const status = onsetMs === null ? 'no_speech_detected' : 'ok';
+    return {
+      image_onset_ms_rel: imageOnsetRel,
+      onset_ms_from_recording_start: onsetMs,
+      latency_ms_from_image_onset: onsetMs === null ? null : onsetMs - imageOnsetRel,
+      latency_status: status,
+      latency_dynamic_threshold_db: dynamicThreshold,
+      latency_fallback_used: fallbackUsed,
+      latency_note: onsetMs === null ? 'No onset above threshold after image onset' : '',
+    };
+  }
+
+  async function appendLatencyMetrics(results, recordings) {
+    if (!recordings || recordings.length === 0) return;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+    const recByName = new Map(recordings.map((rec) => [rec.filename, rec]));
+    for (let i = 0; i < results.length; i++) {
+      setStatus(`Latency解析中 (${i + 1}/${results.length})`);
+      const row = results[i];
+      const imageOnsetAbs = Number(row.image_onset_ms) || 0;
+      const recStartAbs = Number(row.recording_start_ms) || 0;
+      row.image_onset_ms_rel = Math.max(0, imageOnsetAbs - recStartAbs);
+      const rec = recByName.get(row.recording_file) || recordings[i];
+      if (!rec || !rec.blob) {
+        row.latency_status = 'missing_audio';
+        row.latency_note = 'WAV not found';
+        continue;
+      }
+      try {
+        const arrBuf = await rec.blob.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrBuf.slice(0));
+        const metrics = computeLatencyMetrics(audioBuffer, row);
+        Object.assign(row, metrics);
+      } catch (err) {
+        row.latency_status = 'decode_error';
+        row.latency_note = err && err.message ? err.message : 'decode error';
+      }
+    }
+    await audioCtx.close();
+    setStatus('Latency解析が完了しました。結果をまとめています...');
+  }
   function buildProductionOrder(participantId) {
     const n = parseNumericId(participantId);
     const rng = mulberry32(n * 1000 + 7);
@@ -315,7 +478,9 @@
       'image_onset_epoch_ms',
       'recording_start_ms','recording_end_ms',
       'recording_start_epoch_ms','recording_end_epoch_ms',
-      'iti_ms','participant_id','recording_file'
+      'iti_ms','participant_id','recording_file',
+      'image_onset_ms_rel','onset_ms_from_recording_start','latency_ms_from_image_onset',
+      'latency_status','latency_dynamic_threshold_db','latency_fallback_used','latency_note'
     ];
     const lines = [header.join(',')];
     rows.forEach((r) => {
@@ -335,6 +500,13 @@
         r.iti_ms,
         r.participant_id,
         r.recording_file,
+        fmtOptionalNumber(r.image_onset_ms_rel),
+        fmtOptionalNumber(r.onset_ms_from_recording_start),
+        fmtOptionalNumber(r.latency_ms_from_image_onset),
+        r.latency_status || '',
+        fmtOptionalNumber(r.latency_dynamic_threshold_db),
+        r.latency_fallback_used === true ? 'true' : r.latency_fallback_used === false ? 'false' : '',
+        (r.latency_note || '').replace(/[,\r\n]+/g, ' '),
       ].join(','));
     });
     return lines.join('\n');
@@ -343,7 +515,7 @@
   async function runTask(participantId, order, images, micStream, sessionConfig) {
     const { recordDurationMs, itiMs, restMs, label, recordingEnabled, recordingFileName } = sessionConfig;
     document.body.classList.add('running');
-    showMessage('スペースキーで開始');
+    showMessage(sessionConfig.startMessage || 'スペースキーで開始');
     setStatus(`${label} - 準備ができたらスペースキーで開始してください`);
 
     await new Promise((resolve) => {
@@ -468,9 +640,9 @@
       const practiceImages = await preloadImages(practiceOrder, SESSION_CONFIGS.practice.imageBaseUrl);
       const productionImages = await preloadImages(productionOrder, SESSION_CONFIGS.production.imageBaseUrl);
 
-      setStatus('プリロード完了。スペースキーで練習を開始できます。');
+      setStatus('準備完了。ステップ2/4（練習）をスペースキーで開始できます。');
       startBtn.classList.remove('hidden');
-      showMessage('スペースキーで練習開始');
+      showMessage('練習開始（スペースキー）');
       setLog('');
 
       startBtn.onclick = async () => {
@@ -479,8 +651,8 @@
         try {
           // 練習（録音なし）
           await runTask(participantId, practiceOrder, practiceImages, null, SESSION_CONFIGS.practice);
-          setStatus('練習を完了しました。本番のためマイク許可を確認します...');
-          showMessage('練習終了');
+          setStatus('ステップ3/4: マイク許可を確認します。許可後、ステップ4/4（本番）が始まります。');
+          showMessage('マイク許可をお願いします');
 
           // マイク許可
           let micStream = null;
@@ -488,6 +660,7 @@
 
           // 本番
           const { results, recordings } = await runTask(participantId, productionOrder, productionImages, micStream, SESSION_CONFIGS.production);
+          await appendLatencyMetrics(results, recordings);
           const zipBlob = await createZip(SESSION_CONFIGS.production, participantId, results, recordings);
           const url = URL.createObjectURL(zipBlob);
           // 自動ダウンロード
