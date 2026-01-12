@@ -299,7 +299,7 @@
   }
   function buildProductionOrder(participantId) {
     const n = parseNumericId(participantId);
-    const rng = mulberry32(n * 1000 + 7);
+    const rng = mulberry32(n * 1000 + 23);
     const list1 = seededShuffle(LIST1_TARGETS, rng);
     const list2 = seededShuffle(LIST2_TARGETS, rng);
     let takeFirst = n % 2 === 1; // odd -> List 1 first, even -> List 2 first
